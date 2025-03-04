@@ -36,6 +36,28 @@ P_TARGET_PLATE_ID = "Target Plate ID"
 P_SORTING = "Order runs by"
 
 
+def add_run_if_missing(conn, plate_id):
+    """
+    Check if the plate has a Run, if not, creates one and assigns
+    all WellSamples to it.
+    """
+    update_service = conn.getUpdateService()
+    plate = conn.getObject("Plate", plate_id)
+
+    if len(list(plate.listPlateAcquisitions())) == 0:
+        # No Run on this Plate
+        plate_acq = omero.model.PlateAcquisitionI()
+        plate_acq.name = omero.rtypes.RStringI(plate.getName())
+        plate_acq.plate = omero.model.PlateI(plate.getId(), False)
+
+        all_ws = []
+        for well in plate.listChildren():
+            for ws in well.listChildren():
+                all_ws.append(ws._obj)
+        plate_acq.addAllWellSampleSet(all_ws)
+        update_service.saveObject(plate_acq)
+
+
 def combine_plates(conn, target_plate_id, source_ids, source_type,
                    sort_way, same_screen=True):
     """
@@ -56,36 +78,29 @@ def combine_plates(conn, target_plate_id, source_ids, source_type,
         source_ids = [source_ids]
 
     target_plate = conn.getObject("Plate", target_plate_id)
-    assert target_plate is not None, f"Target Plate:{target_plate} not found."
+    assert target_plate is not None, f"Target Plate:{target_plate_id} not found."
+
+    # Adds a run to the target plate if this one is not empty
+    for well in target_plate.listChildren():
+        if len(list(well.listChildren())) > 0:
+            add_run_if_missing(conn, target_plate_id)
+            # Reload object
+            target_plate = conn.getObject("Plate", target_plate_id)
 
     plate_run_l = []
     if source_type == "Plate":
         # Make sure target is not in source_ids
         source_ids = set(source_ids).difference({target_plate_id})
-
         for plate_id in source_ids:
-            # Verification that all plates have runs; if not create one.
-            plate_o = conn.getObject("Plate", plate_id)
-            if len(list(plate_o.listPlateAcquisitions())) == 0:
-                # No Run on this Plate
-                plate_acq_o = omero.model.PlateAcquisitionI()
-                plate_acq_o.name = omero.rtypes.RStringI(plate_o.getName())
-                plate_acq_o.plate = omero.model.PlateI(plate_o.getId(), False)
+            add_run_if_missing(conn, plate_id)
 
-                all_ws = []
-                for well in plate_o.listChildren():
-                    for ws in well.listChildren():
-                        all_ws.append(ws._obj)
-                plate_acq_o.addAllWellSampleSet(all_ws)
-                update_service.saveObject(plate_acq_o)
-
-        # Reload all objects and create (plate_obj, run_obj) tuples
+        # Load all objects and create (plate_obj, run_obj) tuples
         for plate_o in conn.getObjects("Plate", source_ids):
             plate_run_l.extend([(plate_o, run_o) for run_o in plate_o.listPlateAcquisitions()])
     else:
         plate_run_l = [(run_o.getParent(), run_o) for run_o in conn.getObjects("PlateAcquisition", source_ids)]
 
-    if sort_way == "Plate & run name":
+    if sort_way == "Plate & Acquisition name":
         plate_run_l = sorted(plate_run_l, key=lambda x: (x[0].getName(), x[1].getName()))
     elif sort_way == "Acquisition name":
         plate_run_l = sorted(plate_run_l, key=lambda x: x[1].getName())
@@ -174,7 +189,7 @@ def run_script():
     ]
 
     sort_ways = [
-        rstring("Plate name"),
+        rstring("Plate & Acquisition name"),
         rstring("Acquisition name"),
         rstring("Acquisition start time")
     ]
@@ -187,6 +202,8 @@ def run_script():
         """
     Merge several plates into the first (sorted alphabetically).
     \t
+    Safety check: The plates being merged must be part of the same screen.
+    (the script will also fail if one of the plates is not assigned to a screen)
         """,  # Tabs are needed to add line breaks in the HTML
 
         scripts.Int(
