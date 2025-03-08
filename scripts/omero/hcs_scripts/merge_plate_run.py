@@ -42,9 +42,16 @@ def add_run_if_missing(conn, plate_id):
     all WellSamples to it.
     """
     update_service = conn.getUpdateService()
+
     plate = conn.getObject("Plate", plate_id)
 
-    if len(list(plate.listPlateAcquisitions())) == 0:
+    has_image = False
+    for well in plate.listChildren():
+        if len(list(well.listChildren())) > 0:
+            has_image = True
+            break
+
+    if len(list(plate.listPlateAcquisitions())) == 0 and has_image:
         # No Run on this Plate
         plate_acq = omero.model.PlateAcquisitionI()
         plate_acq.name = omero.rtypes.RStringI(plate.getName())
@@ -56,6 +63,8 @@ def add_run_if_missing(conn, plate_id):
                 all_ws.append(ws._obj)
         plate_acq.addAllWellSampleSet(all_ws)
         update_service.saveObject(plate_acq)
+
+    return has_image
 
 
 def combine_plates(conn, target_plate_id, source_ids, source_type,
@@ -92,7 +101,11 @@ def combine_plates(conn, target_plate_id, source_ids, source_type,
         # Make sure target is not in source_ids
         source_ids = set(source_ids).difference({target_plate_id})
         for plate_id in source_ids:
-            add_run_if_missing(conn, plate_id)
+            has_image = add_run_if_missing(conn, plate_id)
+            if not has_image:
+                # No image in this plate, skipping it
+                print(f"No image found in Plate:{plate_id}, skipping")
+                source_ids = source_ids - {plate_id}
 
         # Load all objects and create (plate_obj, run_obj) tuples
         for plate_o in conn.getObjects("Plate", source_ids):
