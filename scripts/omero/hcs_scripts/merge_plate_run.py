@@ -160,8 +160,8 @@ def combine_plates(conn, target_plate_id, source_ids, source_type,
     for plate, run in plate_run_l:
         for well in plate.listChildren():
             well_oi = well_d[well.getWellPos()]
-
-            for ws in filter(lambda x: x._obj.plateAcquisition._id._val == run.getId(),
+            print(list(well.listChildren()))
+            for ws in filter(lambda x: not (x._obj.plateAcquisition is None) and x._obj.plateAcquisition._id._val == run.getId(),
                              well.listChildren()):
                 ws._obj.setWell(well_oi)
                 well_oi.addWellSample(ws._obj)
@@ -230,12 +230,12 @@ def run_script():
 
         scripts.List(
             P_IDS, optional=False, grouping="1.2",
-            description="IDs of the plates or runs to move " +
+            description="IDs of the plates or runs to move." +
                         f"to '{P_TARGET_PLATE_ID}'.").ofType(rlong(0)),
 
         scripts.String(
             P_SORTING, optional=False, grouping="1.3", values=sort_ways,
-            description="IDs of the plates or runs to move " +
+            description="The order in which the Runs are merged into the plate." +
                         f"to '{P_TARGET_PLATE_ID}'."),
 
         authors=["Tom Boissonnet"],
